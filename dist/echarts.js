@@ -19342,9 +19342,11 @@ var fetchers = {
             var axisDim = coordSysDims[index];
             axisMap.set(axisDim, axisModel);
 
-            if (isCategory(axisModel) && result.firstCategoryDimIndex == null) {
+            if (isCategory(axisModel)) {
                 categoryAxisMap.set(axisDim, axisModel);
-                result.firstCategoryDimIndex = index;
+                if (result.firstCategoryDimIndex == null) {
+                    result.firstCategoryDimIndex = index;
+                }
             }
         });
     }
