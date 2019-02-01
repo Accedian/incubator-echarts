@@ -183,19 +183,24 @@ function getCoverInfoList(axisModel) {
     return zrUtil.map(axisModel.activeIntervals, function (interval) {
         var rangeStart = interval[0]
         var rangeEnd = interval[1]
+        var clamp = true
+
         if (axis.type === 'category' &&
             axis.scale.type === 'ordinal' &&
             rangeStart === rangeEnd) {
-            rangeStart = rangeStart - 0.5
-            rangeEnd = rangeEnd + 0.5
+            var extent = axis.getExtent()
+            var ordinalBuffer = (extent[1] - extent[0]) * 0.1 // 10%
+            rangeStart = rangeStart - ordinalBuffer
+            rangeEnd = rangeEnd + ordinalBuffer
+            clamp = false
         }
 
         return {
             brushType: 'lineX',
             panelId: 'pl',
             range: [
-                axis.dataToCoord(rangeStart, true),
-                axis.dataToCoord(rangeEnd, true)
+                axis.dataToCoord(rangeStart, clamp),
+                axis.dataToCoord(rangeEnd, clamp)
             ]
         };
     });
