@@ -188,7 +188,7 @@ function getCoverInfoList(axisModel) {
         if (axis.type === 'category' &&
             axis.scale.type === 'ordinal' &&
             rangeStart === rangeEnd) {
-            var extent = axis.getExtent()
+            var extent = axis.scale.getExtent()
             var ordinalBuffer = (extent[1] - extent[0]) * 0.1 // 10%
             rangeStart = rangeStart - ordinalBuffer
             rangeEnd = rangeEnd + ordinalBuffer
