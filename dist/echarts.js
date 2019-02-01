@@ -56710,12 +56710,21 @@ function fromAxisAreaSelect(axisModel, ecModel, payload) {
 function getCoverInfoList(axisModel) {
     var axis = axisModel.axis;
     return map(axisModel.activeIntervals, function (interval) {
+        var rangeStart = interval[0];
+        var rangeEnd = interval[1];
+        if (axis.type === 'category' &&
+            axis.scale.type === 'ordinal' &&
+            rangeStart === rangeEnd) {
+            rangeStart = rangeStart - 0.5;
+            rangeEnd = rangeEnd + 0.5;
+        }
+
         return {
             brushType: 'lineX',
             panelId: 'pl',
             range: [
-                axis.dataToCoord(interval[0], true),
-                axis.dataToCoord(interval[1], true)
+                axis.dataToCoord(rangeStart, true),
+                axis.dataToCoord(rangeEnd, true)
             ]
         };
     });
