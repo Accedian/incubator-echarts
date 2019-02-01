@@ -181,26 +181,26 @@ function fromAxisAreaSelect(axisModel, ecModel, payload) {
 function getCoverInfoList(axisModel) {
     var axis = axisModel.axis;
     return zrUtil.map(axisModel.activeIntervals, function (interval) {
-        var rangeStart = interval[0]
-        var rangeEnd = interval[1]
-        var clamp = true
+        if (axis.type === 'category' && axis.scale.type === 'ordinal' && rangeStart === rangeEnd) {
+            var coord = axis.dataToCoord(rangeStart, clamp)
+            var coordBuffer = 10
 
-        if (axis.type === 'category' &&
-            axis.scale.type === 'ordinal' &&
-            rangeStart === rangeEnd) {
-            var extent = axis.scale.getExtent()
-            var ordinalBuffer = (extent[1] - extent[0]) * 0.1 // 10%
-            rangeStart = rangeStart - ordinalBuffer
-            rangeEnd = rangeEnd + ordinalBuffer
-            clamp = false
+            return {
+                brushType: 'lineX',
+                panelId: 'pl',
+                range: [
+                    coord - coordBuffer,
+                    coord + coordBuffer
+                ]
+            };
         }
 
         return {
             brushType: 'lineX',
             panelId: 'pl',
             range: [
-                axis.dataToCoord(rangeStart, clamp),
-                axis.dataToCoord(rangeEnd, clamp)
+                axis.dataToCoord(interval[0], true),
+                axis.dataToCoord(interval[1], true)
             ]
         };
     });
