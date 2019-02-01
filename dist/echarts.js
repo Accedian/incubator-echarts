@@ -30483,7 +30483,7 @@ function getIntervalPrecision(interval) {
     return getPrecisionSafe(interval) + 2;
 }
 
-function clamp$1(niceTickExtent, idx, extent) {
+function clamp(niceTickExtent, idx, extent) {
     niceTickExtent[idx] = Math.max(Math.min(niceTickExtent[idx], extent[1]), extent[0]);
 }
 
@@ -30491,8 +30491,8 @@ function clamp$1(niceTickExtent, idx, extent) {
 function fixExtent(niceTickExtent, extent) {
     !isFinite(niceTickExtent[0]) && (niceTickExtent[0] = extent[0]);
     !isFinite(niceTickExtent[1]) && (niceTickExtent[1] = extent[1]);
-    clamp$1(niceTickExtent, 0, extent);
-    clamp$1(niceTickExtent, 1, extent);
+    clamp(niceTickExtent, 0, extent);
+    clamp(niceTickExtent, 1, extent);
     if (niceTickExtent[0] > niceTickExtent[1]) {
         niceTickExtent[0] = niceTickExtent[1];
     }
@@ -56710,8 +56710,8 @@ function fromAxisAreaSelect(axisModel, ecModel, payload) {
 function getCoverInfoList(axisModel) {
     var axis = axisModel.axis;
     return map(axisModel.activeIntervals, function (interval) {
-        if (axis.type === 'category' && axis.scale.type === 'ordinal' && rangeStart === rangeEnd) {
-            var coord = axis.dataToCoord(rangeStart, clamp);
+        if (axis.type === 'category' && axis.scale.type === 'ordinal' && interval[0] === interval[1]) {
+            var coord = axis.dataToCoord(interval[0], true);
             var coordBuffer = 10;
 
             return {

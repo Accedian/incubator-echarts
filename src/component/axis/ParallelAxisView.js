@@ -181,8 +181,8 @@ function fromAxisAreaSelect(axisModel, ecModel, payload) {
 function getCoverInfoList(axisModel) {
     var axis = axisModel.axis;
     return zrUtil.map(axisModel.activeIntervals, function (interval) {
-        if (axis.type === 'category' && axis.scale.type === 'ordinal' && rangeStart === rangeEnd) {
-            var coord = axis.dataToCoord(rangeStart, clamp)
+        if (axis.type === 'category' && axis.scale.type === 'ordinal' && interval[0] === interval[1]) {
+            var coord = axis.dataToCoord(interval[0], true)
             var coordBuffer = 10
 
             return {
