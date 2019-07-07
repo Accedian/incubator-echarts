@@ -223,6 +223,15 @@ function updateZoomBtnStatus(featureModel, ecModel, view, payload, api) {
         retrieveAxisSetting(featureModel.option), ecModel, {include: ['grid']}
     );
 
+    var brushStyle = {
+        lineWidth: 0,
+        fill: 'rgba(0,0,0,0.2)'
+    }
+
+    if (featureModel.option.brushStyle) {
+        brushStyle = featureModel.option.brushStyle
+    }
+
     view._brushController
         .setPanels(brushTargetManager.makePanelOpts(api, function (targetInfo) {
             return (targetInfo.xAxisDeclared && !targetInfo.yAxisDeclared)
@@ -235,11 +244,7 @@ function updateZoomBtnStatus(featureModel, ecModel, view, payload, api) {
             zoomActive
             ? {
                 brushType: 'auto',
-                brushStyle: {
-                    // FIXME user customized?
-                    lineWidth: 0,
-                    fill: 'rgba(0,0,0,0.2)'
-                }
+                brushStyle: brushStyle
             }
             : false
         );
