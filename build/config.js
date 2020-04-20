@@ -18,7 +18,7 @@
 */
 
 const nodeResolvePlugin = require('rollup-plugin-node-resolve');
-const uglifyPlugin = require('rollup-plugin-uglify');
+const { terser } = require('rollup-plugin-terser');
 const ecRemoveDevPlugin = require('./rollup-plugin-ec-remove-dev');
 const ecLangPlugin = require('./rollup-plugin-ec-lang');
 const {resolve} = require('path');
@@ -49,7 +49,7 @@ function getPlugins({min, lang, sourcemap, removeDev, addBundleVersion}) {
         }
     });
 
-    min && plugins.push(uglifyPlugin({
+    min && plugins.push(terser({
         compress: {
             // Eliminate __DEV__ code.
             // Currently, in uglify:
