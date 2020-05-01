@@ -20,6 +20,8 @@ import './src/component/tooltip';
 import './src/component/axisPointer';
 import './src/component/brush';
 
+import './src/component/legend';
+
 import './src/component/markPoint';
 import './src/component/markArea';
 
