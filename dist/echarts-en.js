@@ -62434,8 +62434,8 @@
                 brushType: 'lineX',
                 panelId: 'pl',
                 range: [
-                    axis.dataToCoord(interval[0] - coordBuffer, true),
-                    axis.dataToCoord(interval[1] + coordBuffer, true)
+                    axis.dataToCoord(interval[0], true) - coordBuffer,
+                    axis.dataToCoord(interval[1], true) + coordBuffer
                 ]
             };
         });
