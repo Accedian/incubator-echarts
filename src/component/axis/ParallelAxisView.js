@@ -181,12 +181,13 @@ function fromAxisAreaSelect(axisModel, ecModel, payload) {
 function getCoverInfoList(axisModel) {
     var axis = axisModel.axis;
     return zrUtil.map(axisModel.activeIntervals, function (interval) {
+        var coordBuffer = 10;
         return {
             brushType: 'lineX',
             panelId: 'pl',
             range: [
-                axis.dataToCoord(interval[0], true),
-                axis.dataToCoord(interval[1], true)
+                axis.dataToCoord(interval[0] - coordBuffer, true),
+                axis.dataToCoord(interval[1] + coordBuffer, true)
             ]
         };
     });
