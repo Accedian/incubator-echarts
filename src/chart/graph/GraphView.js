@@ -17,16 +17,16 @@
 * under the License.
 */
 
-import * as echarts from '../../echarts';
 import * as zrUtil from 'zrender/src/core/util';
-import SymbolDraw from '../helper/SymbolDraw';
-import LineDraw from '../helper/LineDraw';
+import { onIrrelevantElement } from '../../component/helper/cursorHelper';
 import RoamController from '../../component/helper/RoamController';
 import * as roamHelper from '../../component/helper/roamHelper';
-import {onIrrelevantElement} from '../../component/helper/cursorHelper';
+import * as echarts from '../../echarts';
 import * as graphic from '../../util/graphic';
+import LineDraw from '../helper/LineDraw';
+import SymbolDraw from '../helper/SymbolDraw';
 import adjustEdge from './adjustEdge';
-import {getNodeGlobalScale} from './graphHelper';
+import { getNodeGlobalScale } from './graphHelper';
 
 var FOCUS_ADJACENCY = '__focusNodeAdjacency';
 var UNFOCUS_ADJACENCY = '__unfocusNodeAdjacency';
@@ -41,7 +41,7 @@ function getItemOpacity(item, opacityPath) {
 
 function fadeOutItem(item, opacityPath, opacityRatio) {
     var el = item.getGraphicEl();
-    var opacity = getItemOpacity(item, opacityPath);
+    var opacity = item.getModel('emphasis.lineStyle').getItemStyle().opacity;
 
     if (opacityRatio != null) {
         opacity == null && (opacity = 1);
