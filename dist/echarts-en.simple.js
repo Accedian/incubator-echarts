@@ -9747,6 +9747,10 @@
                 if (this._layerConfig[zlevel]) {
                     merge(layer, this._layerConfig[zlevel], true);
                 }
+                // TODO Remove EL_AFTER_INCREMENTAL_INC magic number
+                else if (this._layerConfig[zlevel - EL_AFTER_INCREMENTAL_INC]) {
+                    merge(layer, this._layerConfig[zlevel - EL_AFTER_INCREMENTAL_INC], true);
+                }
 
                 if (virtual) {
                     layer.virtual = virtual;
@@ -9899,12 +9903,26 @@
 
             var prevLayer = null;
             var incrementalLayerCount = 0;
+            var prevZlevel;
             for (var i = 0; i < list.length; i++) {
                 var el = list[i];
                 var zlevel = el.zlevel;
                 var layer;
-                // PENDING If change one incremental element style ?
-                // TODO Where there are non-incremental elements between incremental elements.
+
+                if (prevZlevel !== zlevel) {
+                    prevZlevel = zlevel;
+                    incrementalLayerCount = 0;
+                }
+
+                // TODO Not use magic number on zlevel.
+
+                // Each layer with increment element can be separated to 3 layers.
+                //          (Other Element drawn after incremental element)
+                // -----------------zlevel + EL_AFTER_INCREMENTAL_INC--------------------
+                //                      (Incremental element)
+                // ----------------------zlevel + INCREMENTAL_INC------------------------
+                //              (Element drawn before incremental element)
+                // --------------------------------zlevel--------------------------------
                 if (el.incremental) {
                     layer = this.getLayer(zlevel + INCREMENTAL_INC, this._needsManuallyCompositing);
                     layer.incremental = true;
@@ -9999,6 +10017,7 @@
 
                 for (var i = 0; i < this._zlevelList.length; i++) {
                     var _zlevel = this._zlevelList[i];
+                    // TODO Remove EL_AFTER_INCREMENTAL_INC magic number
                     if (_zlevel === zlevel || _zlevel === zlevel + EL_AFTER_INCREMENTAL_INC) {
                         var layer = this._layers[_zlevel];
                         merge(layer, layerConfig[zlevel], true);
@@ -11066,7 +11085,7 @@
     /**
      * @type {string}
      */
-    var version = '4.3.0';
+    var version = '4.3.1';
 
     /**
      * Initializing a zrender instance
