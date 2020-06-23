@@ -120,7 +120,7 @@ export default MarkerView.extend({
                     symbolSize = symbolSize(rawIdx, dataParams);
                 }
                 if (isFnSymbolRotate) {
-                    symbolRotate = symbolRotate(rawIdx, dataParams);
+                    symbolRotate = symbolRotate(rawIdx, dataParams, mpData.getItemLayout(idx), seriesModel.coordinateSystem.grid.getRect());
                 }
             }
 
