@@ -17,31 +17,31 @@
 * under the License.
 */
 
-import * as zrUtil from 'zrender/src/core/util';
-import * as pathTool from 'zrender/src/tool/path';
-import * as colorTool from 'zrender/src/tool/color';
-import * as matrix from 'zrender/src/core/matrix';
-import * as vector from 'zrender/src/core/vector';
-import Path from 'zrender/src/graphic/Path';
-import Transformable from 'zrender/src/mixin/Transformable';
-import ZImage from 'zrender/src/graphic/Image';
 import Group from 'zrender/src/container/Group';
-import Text from 'zrender/src/graphic/Text';
+import BoundingRect from 'zrender/src/core/BoundingRect';
+import * as matrix from 'zrender/src/core/matrix';
+import * as zrUtil from 'zrender/src/core/util';
+import * as vector from 'zrender/src/core/vector';
+import CompoundPath from 'zrender/src/graphic/CompoundPath';
+import * as subPixelOptimizeUtil from 'zrender/src/graphic/helper/subPixelOptimize';
+import ZImage from 'zrender/src/graphic/Image';
+import IncrementalDisplayable from 'zrender/src/graphic/IncrementalDisplayable';
+import LinearGradient from 'zrender/src/graphic/LinearGradient';
+import Path from 'zrender/src/graphic/Path';
+import RadialGradient from 'zrender/src/graphic/RadialGradient';
+import Arc from 'zrender/src/graphic/shape/Arc';
+import BezierCurve from 'zrender/src/graphic/shape/BezierCurve';
 import Circle from 'zrender/src/graphic/shape/Circle';
-import Sector from 'zrender/src/graphic/shape/Sector';
-import Ring from 'zrender/src/graphic/shape/Ring';
+import Line from 'zrender/src/graphic/shape/Line';
 import Polygon from 'zrender/src/graphic/shape/Polygon';
 import Polyline from 'zrender/src/graphic/shape/Polyline';
 import Rect from 'zrender/src/graphic/shape/Rect';
-import Line from 'zrender/src/graphic/shape/Line';
-import BezierCurve from 'zrender/src/graphic/shape/BezierCurve';
-import Arc from 'zrender/src/graphic/shape/Arc';
-import CompoundPath from 'zrender/src/graphic/CompoundPath';
-import LinearGradient from 'zrender/src/graphic/LinearGradient';
-import RadialGradient from 'zrender/src/graphic/RadialGradient';
-import BoundingRect from 'zrender/src/core/BoundingRect';
-import IncrementalDisplayable from 'zrender/src/graphic/IncrementalDisplayable';
-import * as subPixelOptimizeUtil from 'zrender/src/graphic/helper/subPixelOptimize';
+import Ring from 'zrender/src/graphic/shape/Ring';
+import Sector from 'zrender/src/graphic/shape/Sector';
+import Text from 'zrender/src/graphic/Text';
+import Transformable from 'zrender/src/mixin/Transformable';
+import * as colorTool from 'zrender/src/tool/color';
+import * as pathTool from 'zrender/src/tool/path';
 
 
 var mathMax = Math.max;
@@ -834,7 +834,13 @@ function setTextStyleCommon(textStyle, textStyleModel, opt, isEmphasis) {
         }
 
         textStyle.textPosition = textPosition;
-        textStyle.textOffset = textStyleModel.getShallow('offset');
+
+        var textOffset = textStyleModel.getShallow('offset');
+        if (zrUtil.isFunction(textOffset)) {
+            textOffset = textOffset(opt);
+        }
+        textStyle.textOffset = textOffset;
+
         var labelRotate = textStyleModel.getShallow('rotate');
         labelRotate != null && (labelRotate *= Math.PI / 180);
         textStyle.textRotation = labelRotate;

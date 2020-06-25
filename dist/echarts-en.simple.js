@@ -14832,6 +14832,1238 @@
 
     inherits(Path, Displayable);
 
+    // CompoundPath to improve performance
+
+    var CompoundPath = Path.extend({
+
+        type: 'compound',
+
+        shape: {
+
+            paths: null
+        },
+
+        _updatePathDirty: function () {
+            var dirtyPath = this.__dirtyPath;
+            var paths = this.shape.paths;
+            for (var i = 0; i < paths.length; i++) {
+                // Mark as dirty if any subpath is dirty
+                dirtyPath = dirtyPath || paths[i].__dirtyPath;
+            }
+            this.__dirtyPath = dirtyPath;
+            this.__dirty = this.__dirty || dirtyPath;
+        },
+
+        beforeBrush: function () {
+            this._updatePathDirty();
+            var paths = this.shape.paths || [];
+            var scale = this.getGlobalScale();
+            // Update path scale
+            for (var i = 0; i < paths.length; i++) {
+                if (!paths[i].path) {
+                    paths[i].createPathProxy();
+                }
+                paths[i].path.setScale(scale[0], scale[1], paths[i].segmentIgnoreThreshold);
+            }
+        },
+
+        buildPath: function (ctx, shape) {
+            var paths = shape.paths || [];
+            for (var i = 0; i < paths.length; i++) {
+                paths[i].buildPath(ctx, paths[i].shape, true);
+            }
+        },
+
+        afterBrush: function () {
+            var paths = this.shape.paths || [];
+            for (var i = 0; i < paths.length; i++) {
+                paths[i].__dirtyPath = false;
+            }
+        },
+
+        getBoundingRect: function () {
+            this._updatePathDirty();
+            return Path.prototype.getBoundingRect.call(this);
+        }
+    });
+
+    /**
+     * Sub-pixel optimize for canvas rendering, prevent from blur
+     * when rendering a thin vertical/horizontal line.
+     */
+
+    var round = Math.round;
+
+    /**
+     * Sub pixel optimize line for canvas
+     *
+     * @param {Object} outputShape The modification will be performed on `outputShape`.
+     *                 `outputShape` and `inputShape` can be the same object.
+     *                 `outputShape` object can be used repeatly, because all of
+     *                 the `x1`, `x2`, `y1`, `y2` will be assigned in this method.
+     * @param {Object} [inputShape]
+     * @param {number} [inputShape.x1]
+     * @param {number} [inputShape.y1]
+     * @param {number} [inputShape.x2]
+     * @param {number} [inputShape.y2]
+     * @param {Object} [style]
+     * @param {number} [style.lineWidth] If `null`/`undefined`/`0`, do not optimize.
+     */
+    function subPixelOptimizeLine(outputShape, inputShape, style) {
+        if (!inputShape) {
+            return;
+        }
+
+        var x1 = inputShape.x1;
+        var x2 = inputShape.x2;
+        var y1 = inputShape.y1;
+        var y2 = inputShape.y2;
+
+        outputShape.x1 = x1;
+        outputShape.x2 = x2;
+        outputShape.y1 = y1;
+        outputShape.y2 = y2;
+
+        var lineWidth = style && style.lineWidth;
+        if (!lineWidth) {
+            return;
+        }
+
+        if (round(x1 * 2) === round(x2 * 2)) {
+            outputShape.x1 = outputShape.x2 = subPixelOptimize(x1, lineWidth, true);
+        }
+        if (round(y1 * 2) === round(y2 * 2)) {
+            outputShape.y1 = outputShape.y2 = subPixelOptimize(y1, lineWidth, true);
+        }
+    }
+
+    /**
+     * Sub pixel optimize rect for canvas
+     *
+     * @param {Object} outputShape The modification will be performed on `outputShape`.
+     *                 `outputShape` and `inputShape` can be the same object.
+     *                 `outputShape` object can be used repeatly, because all of
+     *                 the `x`, `y`, `width`, `height` will be assigned in this method.
+     * @param {Object} [inputShape]
+     * @param {number} [inputShape.x]
+     * @param {number} [inputShape.y]
+     * @param {number} [inputShape.width]
+     * @param {number} [inputShape.height]
+     * @param {Object} [style]
+     * @param {number} [style.lineWidth] If `null`/`undefined`/`0`, do not optimize.
+     */
+    function subPixelOptimizeRect(outputShape, inputShape, style) {
+        if (!inputShape) {
+            return;
+        }
+
+        var originX = inputShape.x;
+        var originY = inputShape.y;
+        var originWidth = inputShape.width;
+        var originHeight = inputShape.height;
+
+        outputShape.x = originX;
+        outputShape.y = originY;
+        outputShape.width = originWidth;
+        outputShape.height = originHeight;
+
+        var lineWidth = style && style.lineWidth;
+        if (!lineWidth) {
+            return;
+        }
+
+        outputShape.x = subPixelOptimize(originX, lineWidth, true);
+        outputShape.y = subPixelOptimize(originY, lineWidth, true);
+        outputShape.width = Math.max(
+            subPixelOptimize(originX + originWidth, lineWidth, false) - outputShape.x,
+            originWidth === 0 ? 0 : 1
+        );
+        outputShape.height = Math.max(
+            subPixelOptimize(originY + originHeight, lineWidth, false) - outputShape.y,
+            originHeight === 0 ? 0 : 1
+        );
+    }
+
+    /**
+     * Sub pixel optimize for canvas
+     *
+     * @param {number} position Coordinate, such as x, y
+     * @param {number} lineWidth If `null`/`undefined`/`0`, do not optimize.
+     * @param {boolean=} positiveOrNegative Default false (negative).
+     * @return {number} Optimized position.
+     */
+    function subPixelOptimize(position, lineWidth, positiveOrNegative) {
+        if (!lineWidth) {
+            return position;
+        }
+        // Assure that (position + lineWidth / 2) is near integer edge,
+        // otherwise line will be fuzzy in canvas.
+        var doubledPosition = round(position * 2);
+        return (doubledPosition + round(lineWidth)) % 2 === 0
+            ? doubledPosition / 2
+            : (doubledPosition + (positiveOrNegative ? 1 : -1)) / 2;
+    }
+
+    /**
+     * Displayable for incremental rendering. It will be rendered in a separate layer
+     * IncrementalDisplay have two main methods. `clearDisplayables` and `addDisplayables`
+     * addDisplayables will render the added displayables incremetally.
+     *
+     * It use a not clearFlag to tell the painter don't clear the layer if it's the first element.
+     */
+
+    // TODO Style override ?
+    function IncrementalDisplayble(opts) {
+
+        Displayable.call(this, opts);
+
+        this._displayables = [];
+
+        this._temporaryDisplayables = [];
+
+        this._cursor = 0;
+
+        this.notClear = true;
+    }
+
+    IncrementalDisplayble.prototype.incremental = true;
+
+    IncrementalDisplayble.prototype.clearDisplaybles = function () {
+        this._displayables = [];
+        this._temporaryDisplayables = [];
+        this._cursor = 0;
+        this.dirty();
+
+        this.notClear = false;
+    };
+
+    IncrementalDisplayble.prototype.addDisplayable = function (displayable, notPersistent) {
+        if (notPersistent) {
+            this._temporaryDisplayables.push(displayable);
+        }
+        else {
+            this._displayables.push(displayable);
+        }
+        this.dirty();
+    };
+
+    IncrementalDisplayble.prototype.addDisplayables = function (displayables, notPersistent) {
+        notPersistent = notPersistent || false;
+        for (var i = 0; i < displayables.length; i++) {
+            this.addDisplayable(displayables[i], notPersistent);
+        }
+    };
+
+    IncrementalDisplayble.prototype.eachPendingDisplayable = function (cb) {
+        for (var i = this._cursor; i < this._displayables.length; i++) {
+            cb && cb(this._displayables[i]);
+        }
+        for (var i = 0; i < this._temporaryDisplayables.length; i++) {
+            cb && cb(this._temporaryDisplayables[i]);
+        }
+    };
+
+    IncrementalDisplayble.prototype.update = function () {
+        this.updateTransform();
+        for (var i = this._cursor; i < this._displayables.length; i++) {
+            var displayable = this._displayables[i];
+            // PENDING
+            displayable.parent = this;
+            displayable.update();
+            displayable.parent = null;
+        }
+        for (var i = 0; i < this._temporaryDisplayables.length; i++) {
+            var displayable = this._temporaryDisplayables[i];
+            // PENDING
+            displayable.parent = this;
+            displayable.update();
+            displayable.parent = null;
+        }
+    };
+
+    IncrementalDisplayble.prototype.brush = function (ctx, prevEl) {
+        // Render persistant displayables.
+        for (var i = this._cursor; i < this._displayables.length; i++) {
+            var displayable = this._displayables[i];
+            displayable.beforeBrush && displayable.beforeBrush(ctx);
+            displayable.brush(ctx, i === this._cursor ? null : this._displayables[i - 1]);
+            displayable.afterBrush && displayable.afterBrush(ctx);
+        }
+        this._cursor = i;
+        // Render temporary displayables.
+        for (var i = 0; i < this._temporaryDisplayables.length; i++) {
+            var displayable = this._temporaryDisplayables[i];
+            displayable.beforeBrush && displayable.beforeBrush(ctx);
+            displayable.brush(ctx, i === 0 ? null : this._temporaryDisplayables[i - 1]);
+            displayable.afterBrush && displayable.afterBrush(ctx);
+        }
+
+        this._temporaryDisplayables = [];
+
+        this.notClear = true;
+    };
+
+    var m = [];
+    IncrementalDisplayble.prototype.getBoundingRect = function () {
+        if (!this._rect) {
+            var rect = new BoundingRect(Infinity, Infinity, -Infinity, -Infinity);
+            for (var i = 0; i < this._displayables.length; i++) {
+                var displayable = this._displayables[i];
+                var childRect = displayable.getBoundingRect().clone();
+                if (displayable.needLocalTransform()) {
+                    childRect.applyTransform(displayable.getLocalTransform(m));
+                }
+                rect.union(childRect);
+            }
+            this._rect = rect;
+        }
+        return this._rect;
+    };
+
+    IncrementalDisplayble.prototype.contain = function (x, y) {
+        var localPos = this.transformCoordToLocal(x, y);
+        var rect = this.getBoundingRect();
+
+        if (rect.contain(localPos[0], localPos[1])) {
+            for (var i = 0; i < this._displayables.length; i++) {
+                var displayable = this._displayables[i];
+                if (displayable.contain(x, y)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    inherits(IncrementalDisplayble, Displayable);
+
+    /**
+     * @param {Array.<Object>} colorStops
+     */
+    var Gradient = function (colorStops) {
+
+        this.colorStops = colorStops || [];
+
+    };
+
+    Gradient.prototype = {
+
+        constructor: Gradient,
+
+        addColorStop: function (offset, color) {
+            this.colorStops.push({
+
+                offset: offset,
+
+                color: color
+            });
+        }
+
+    };
+
+    /**
+     * x, y, x2, y2 are all percent from 0 to 1
+     * @param {number} [x=0]
+     * @param {number} [y=0]
+     * @param {number} [x2=1]
+     * @param {number} [y2=0]
+     * @param {Array.<Object>} colorStops
+     * @param {boolean} [globalCoord=false]
+     */
+    var LinearGradient = function (x, y, x2, y2, colorStops, globalCoord) {
+        // Should do nothing more in this constructor. Because gradient can be
+        // declard by `color: {type: 'linear', colorStops: ...}`, where
+        // this constructor will not be called.
+
+        this.x = x == null ? 0 : x;
+
+        this.y = y == null ? 0 : y;
+
+        this.x2 = x2 == null ? 1 : x2;
+
+        this.y2 = y2 == null ? 0 : y2;
+
+        // Can be cloned
+        this.type = 'linear';
+
+        // If use global coord
+        this.global = globalCoord || false;
+
+        Gradient.call(this, colorStops);
+    };
+
+    LinearGradient.prototype = {
+
+        constructor: LinearGradient
+    };
+
+    inherits(LinearGradient, Gradient);
+
+    /**
+     * x, y, r are all percent from 0 to 1
+     * @param {number} [x=0.5]
+     * @param {number} [y=0.5]
+     * @param {number} [r=0.5]
+     * @param {Array.<Object>} [colorStops]
+     * @param {boolean} [globalCoord=false]
+     */
+    var RadialGradient = function (x, y, r, colorStops, globalCoord) {
+        // Should do nothing more in this constructor. Because gradient can be
+        // declard by `color: {type: 'radial', colorStops: ...}`, where
+        // this constructor will not be called.
+
+        this.x = x == null ? 0.5 : x;
+
+        this.y = y == null ? 0.5 : y;
+
+        this.r = r == null ? 0.5 : r;
+
+        // Can be cloned
+        this.type = 'radial';
+
+        // If use global coord
+        this.global = globalCoord || false;
+
+        Gradient.call(this, colorStops);
+    };
+
+    RadialGradient.prototype = {
+
+        constructor: RadialGradient
+    };
+
+    inherits(RadialGradient, Gradient);
+
+    /**
+     * 圆弧
+     * @module zrender/graphic/shape/Arc
+     */
+
+    var Arc = Path.extend({
+
+        type: 'arc',
+
+        shape: {
+
+            cx: 0,
+
+            cy: 0,
+
+            r: 0,
+
+            startAngle: 0,
+
+            endAngle: Math.PI * 2,
+
+            clockwise: true
+        },
+
+        style: {
+
+            stroke: '#000',
+
+            fill: null
+        },
+
+        buildPath: function (ctx, shape) {
+
+            var x = shape.cx;
+            var y = shape.cy;
+            var r = Math.max(shape.r, 0);
+            var startAngle = shape.startAngle;
+            var endAngle = shape.endAngle;
+            var clockwise = shape.clockwise;
+
+            var unitX = Math.cos(startAngle);
+            var unitY = Math.sin(startAngle);
+
+            ctx.moveTo(unitX * r + x, unitY * r + y);
+            ctx.arc(x, y, r, startAngle, endAngle, !clockwise);
+        }
+    });
+
+    /**
+     * 贝塞尔曲线
+     * @module zrender/shape/BezierCurve
+     */
+
+    var out = [];
+
+    function someVectorAt(shape, t, isTangent) {
+        var cpx2 = shape.cpx2;
+        var cpy2 = shape.cpy2;
+        if (cpx2 === null || cpy2 === null) {
+            return [
+                (isTangent ? cubicDerivativeAt : cubicAt)(shape.x1, shape.cpx1, shape.cpx2, shape.x2, t),
+                (isTangent ? cubicDerivativeAt : cubicAt)(shape.y1, shape.cpy1, shape.cpy2, shape.y2, t)
+            ];
+        }
+        else {
+            return [
+                (isTangent ? quadraticDerivativeAt : quadraticAt)(shape.x1, shape.cpx1, shape.x2, t),
+                (isTangent ? quadraticDerivativeAt : quadraticAt)(shape.y1, shape.cpy1, shape.y2, t)
+            ];
+        }
+    }
+
+    var BezierCurve = Path.extend({
+
+        type: 'bezier-curve',
+
+        shape: {
+            x1: 0,
+            y1: 0,
+            x2: 0,
+            y2: 0,
+            cpx1: 0,
+            cpy1: 0,
+            // cpx2: 0,
+            // cpy2: 0
+
+            // Curve show percent, for animating
+            percent: 1
+        },
+
+        style: {
+            stroke: '#000',
+            fill: null
+        },
+
+        buildPath: function (ctx, shape) {
+            var x1 = shape.x1;
+            var y1 = shape.y1;
+            var x2 = shape.x2;
+            var y2 = shape.y2;
+            var cpx1 = shape.cpx1;
+            var cpy1 = shape.cpy1;
+            var cpx2 = shape.cpx2;
+            var cpy2 = shape.cpy2;
+            var percent = shape.percent;
+            if (percent === 0) {
+                return;
+            }
+
+            ctx.moveTo(x1, y1);
+
+            if (cpx2 == null || cpy2 == null) {
+                if (percent < 1) {
+                    quadraticSubdivide(
+                        x1, cpx1, x2, percent, out
+                    );
+                    cpx1 = out[1];
+                    x2 = out[2];
+                    quadraticSubdivide(
+                        y1, cpy1, y2, percent, out
+                    );
+                    cpy1 = out[1];
+                    y2 = out[2];
+                }
+
+                ctx.quadraticCurveTo(
+                    cpx1, cpy1,
+                    x2, y2
+                );
+            }
+            else {
+                if (percent < 1) {
+                    cubicSubdivide(
+                        x1, cpx1, cpx2, x2, percent, out
+                    );
+                    cpx1 = out[1];
+                    cpx2 = out[2];
+                    x2 = out[3];
+                    cubicSubdivide(
+                        y1, cpy1, cpy2, y2, percent, out
+                    );
+                    cpy1 = out[1];
+                    cpy2 = out[2];
+                    y2 = out[3];
+                }
+                ctx.bezierCurveTo(
+                    cpx1, cpy1,
+                    cpx2, cpy2,
+                    x2, y2
+                );
+            }
+        },
+
+        /**
+         * Get point at percent
+         * @param  {number} t
+         * @return {Array.<number>}
+         */
+        pointAt: function (t) {
+            return someVectorAt(this.shape, t, false);
+        },
+
+        /**
+         * Get tangent at percent
+         * @param  {number} t
+         * @return {Array.<number>}
+         */
+        tangentAt: function (t) {
+            var p = someVectorAt(this.shape, t, true);
+            return normalize(p, p);
+        }
+    });
+
+    /**
+     * 圆形
+     * @module zrender/shape/Circle
+     */
+
+    var Circle = Path.extend({
+
+        type: 'circle',
+
+        shape: {
+            cx: 0,
+            cy: 0,
+            r: 0
+        },
+
+
+        buildPath: function (ctx, shape, inBundle) {
+            // Better stroking in ShapeBundle
+            // Always do it may have performence issue ( fill may be 2x more cost)
+            if (inBundle) {
+                ctx.moveTo(shape.cx + shape.r, shape.cy);
+            }
+            // else {
+            //     if (ctx.allocate && !ctx.data.length) {
+            //         ctx.allocate(ctx.CMD_MEM_SIZE.A);
+            //     }
+            // }
+            // Better stroking in ShapeBundle
+            // ctx.moveTo(shape.cx + shape.r, shape.cy);
+            ctx.arc(shape.cx, shape.cy, shape.r, 0, Math.PI * 2, true);
+        }
+    });
+
+    /**
+     * 直线
+     * @module zrender/graphic/shape/Line
+     */
+
+    // Avoid create repeatly.
+    var subPixelOptimizeOutputShape = {};
+
+    var Line = Path.extend({
+
+        type: 'line',
+
+        shape: {
+            // Start point
+            x1: 0,
+            y1: 0,
+            // End point
+            x2: 0,
+            y2: 0,
+
+            percent: 1
+        },
+
+        style: {
+            stroke: '#000',
+            fill: null
+        },
+
+        buildPath: function (ctx, shape) {
+            var x1;
+            var y1;
+            var x2;
+            var y2;
+
+            if (this.subPixelOptimize) {
+                subPixelOptimizeLine(subPixelOptimizeOutputShape, shape, this.style);
+                x1 = subPixelOptimizeOutputShape.x1;
+                y1 = subPixelOptimizeOutputShape.y1;
+                x2 = subPixelOptimizeOutputShape.x2;
+                y2 = subPixelOptimizeOutputShape.y2;
+            }
+            else {
+                x1 = shape.x1;
+                y1 = shape.y1;
+                x2 = shape.x2;
+                y2 = shape.y2;
+            }
+
+            var percent = shape.percent;
+
+            if (percent === 0) {
+                return;
+            }
+
+            ctx.moveTo(x1, y1);
+
+            if (percent < 1) {
+                x2 = x1 * (1 - percent) + x2 * percent;
+                y2 = y1 * (1 - percent) + y2 * percent;
+            }
+            ctx.lineTo(x2, y2);
+        },
+
+        /**
+         * Get point at percent
+         * @param  {number} percent
+         * @return {Array.<number>}
+         */
+        pointAt: function (p) {
+            var shape = this.shape;
+            return [
+                shape.x1 * (1 - p) + shape.x2 * p,
+                shape.y1 * (1 - p) + shape.y2 * p
+            ];
+        }
+    });
+
+    /**
+     * Catmull-Rom spline 插值折线
+     * @module zrender/shape/util/smoothSpline
+     * @author pissang (https://www.github.com/pissang)
+     *         Kener (@Kener-林峰, kener.linfeng@gmail.com)
+     *         errorrik (errorrik@gmail.com)
+     */
+
+    /**
+     * @inner
+     */
+    function interpolate(p0, p1, p2, p3, t, t2, t3) {
+        var v0 = (p2 - p0) * 0.5;
+        var v1 = (p3 - p1) * 0.5;
+        return (2 * (p1 - p2) + v0 + v1) * t3
+                + (-3 * (p1 - p2) - 2 * v0 - v1) * t2
+                + v0 * t + p1;
+    }
+
+    /**
+     * @alias module:zrender/shape/util/smoothSpline
+     * @param {Array} points 线段顶点数组
+     * @param {boolean} isLoop
+     * @return {Array}
+     */
+    function smoothSpline (points, isLoop) {
+        var len$$1 = points.length;
+        var ret = [];
+
+        var distance$$1 = 0;
+        for (var i = 1; i < len$$1; i++) {
+            distance$$1 += distance(points[i - 1], points[i]);
+        }
+
+        var segs = distance$$1 / 2;
+        segs = segs < len$$1 ? len$$1 : segs;
+        for (var i = 0; i < segs; i++) {
+            var pos = i / (segs - 1) * (isLoop ? len$$1 : len$$1 - 1);
+            var idx = Math.floor(pos);
+
+            var w = pos - idx;
+
+            var p0;
+            var p1 = points[idx % len$$1];
+            var p2;
+            var p3;
+            if (!isLoop) {
+                p0 = points[idx === 0 ? idx : idx - 1];
+                p2 = points[idx > len$$1 - 2 ? len$$1 - 1 : idx + 1];
+                p3 = points[idx > len$$1 - 3 ? len$$1 - 1 : idx + 2];
+            }
+            else {
+                p0 = points[(idx - 1 + len$$1) % len$$1];
+                p2 = points[(idx + 1) % len$$1];
+                p3 = points[(idx + 2) % len$$1];
+            }
+
+            var w2 = w * w;
+            var w3 = w * w2;
+
+            ret.push([
+                interpolate(p0[0], p1[0], p2[0], p3[0], w, w2, w3),
+                interpolate(p0[1], p1[1], p2[1], p3[1], w, w2, w3)
+            ]);
+        }
+        return ret;
+    }
+
+    /**
+     * 贝塞尔平滑曲线
+     * @module zrender/shape/util/smoothBezier
+     * @author pissang (https://www.github.com/pissang)
+     *         Kener (@Kener-林峰, kener.linfeng@gmail.com)
+     *         errorrik (errorrik@gmail.com)
+     */
+
+    /**
+     * 贝塞尔平滑曲线
+     * @alias module:zrender/shape/util/smoothBezier
+     * @param {Array} points 线段顶点数组
+     * @param {number} smooth 平滑等级, 0-1
+     * @param {boolean} isLoop
+     * @param {Array} constraint 将计算出来的控制点约束在一个包围盒内
+     *                           比如 [[0, 0], [100, 100]], 这个包围盒会与
+     *                           整个折线的包围盒做一个并集用来约束控制点。
+     * @param {Array} 计算出来的控制点数组
+     */
+    function smoothBezier (points, smooth, isLoop, constraint) {
+        var cps = [];
+
+        var v = [];
+        var v1 = [];
+        var v2 = [];
+        var prevPoint;
+        var nextPoint;
+
+        var min$$1;
+        var max$$1;
+        if (constraint) {
+            min$$1 = [Infinity, Infinity];
+            max$$1 = [-Infinity, -Infinity];
+            for (var i = 0, len$$1 = points.length; i < len$$1; i++) {
+                min(min$$1, min$$1, points[i]);
+                max(max$$1, max$$1, points[i]);
+            }
+            // 与指定的包围盒做并集
+            min(min$$1, min$$1, constraint[0]);
+            max(max$$1, max$$1, constraint[1]);
+        }
+
+        for (var i = 0, len$$1 = points.length; i < len$$1; i++) {
+            var point = points[i];
+
+            if (isLoop) {
+                prevPoint = points[i ? i - 1 : len$$1 - 1];
+                nextPoint = points[(i + 1) % len$$1];
+            }
+            else {
+                if (i === 0 || i === len$$1 - 1) {
+                    cps.push(clone$1(points[i]));
+                    continue;
+                }
+                else {
+                    prevPoint = points[i - 1];
+                    nextPoint = points[i + 1];
+                }
+            }
+
+            sub(v, nextPoint, prevPoint);
+
+            // use degree to scale the handle length
+            scale(v, v, smooth);
+
+            var d0 = distance(point, prevPoint);
+            var d1 = distance(point, nextPoint);
+            var sum = d0 + d1;
+            if (sum !== 0) {
+                d0 /= sum;
+                d1 /= sum;
+            }
+
+            scale(v1, v, -d0);
+            scale(v2, v, d1);
+            var cp0 = add([], point, v1);
+            var cp1 = add([], point, v2);
+            if (constraint) {
+                max(cp0, cp0, min$$1);
+                min(cp0, cp0, max$$1);
+                max(cp1, cp1, min$$1);
+                min(cp1, cp1, max$$1);
+            }
+            cps.push(cp0);
+            cps.push(cp1);
+        }
+
+        if (isLoop) {
+            cps.push(cps.shift());
+        }
+
+        return cps;
+    }
+
+    function buildPath$1(ctx, shape, closePath) {
+        var points = shape.points;
+        var smooth = shape.smooth;
+        if (points && points.length >= 2) {
+            if (smooth && smooth !== 'spline') {
+                var controlPoints = smoothBezier(
+                    points, smooth, closePath, shape.smoothConstraint
+                );
+
+                ctx.moveTo(points[0][0], points[0][1]);
+                var len = points.length;
+                for (var i = 0; i < (closePath ? len : len - 1); i++) {
+                    var cp1 = controlPoints[i * 2];
+                    var cp2 = controlPoints[i * 2 + 1];
+                    var p = points[(i + 1) % len];
+                    ctx.bezierCurveTo(
+                        cp1[0], cp1[1], cp2[0], cp2[1], p[0], p[1]
+                    );
+                }
+            }
+            else {
+                if (smooth === 'spline') {
+                    points = smoothSpline(points, closePath);
+                }
+
+                ctx.moveTo(points[0][0], points[0][1]);
+                for (var i = 1, l = points.length; i < l; i++) {
+                    ctx.lineTo(points[i][0], points[i][1]);
+                }
+            }
+
+            closePath && ctx.closePath();
+        }
+    }
+
+    /**
+     * 多边形
+     * @module zrender/shape/Polygon
+     */
+
+    var Polygon = Path.extend({
+
+        type: 'polygon',
+
+        shape: {
+            points: null,
+
+            smooth: false,
+
+            smoothConstraint: null
+        },
+
+        buildPath: function (ctx, shape) {
+            buildPath$1(ctx, shape, true);
+        }
+    });
+
+    /**
+     * @module zrender/graphic/shape/Polyline
+     */
+
+    var Polyline = Path.extend({
+
+        type: 'polyline',
+
+        shape: {
+            points: null,
+
+            smooth: false,
+
+            smoothConstraint: null
+        },
+
+        style: {
+            stroke: '#000',
+
+            fill: null
+        },
+
+        buildPath: function (ctx, shape) {
+            buildPath$1(ctx, shape, false);
+        }
+    });
+
+    /**
+     * 矩形
+     * @module zrender/graphic/shape/Rect
+     */
+
+    // Avoid create repeatly.
+    var subPixelOptimizeOutputShape$1 = {};
+
+    var Rect = Path.extend({
+
+        type: 'rect',
+
+        shape: {
+            // 左上、右上、右下、左下角的半径依次为r1、r2、r3、r4
+            // r缩写为1         相当于 [1, 1, 1, 1]
+            // r缩写为[1]       相当于 [1, 1, 1, 1]
+            // r缩写为[1, 2]    相当于 [1, 2, 1, 2]
+            // r缩写为[1, 2, 3] 相当于 [1, 2, 3, 2]
+            r: 0,
+
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0
+        },
+
+        buildPath: function (ctx, shape) {
+            var x;
+            var y;
+            var width;
+            var height;
+
+            if (this.subPixelOptimize) {
+                subPixelOptimizeRect(subPixelOptimizeOutputShape$1, shape, this.style);
+                x = subPixelOptimizeOutputShape$1.x;
+                y = subPixelOptimizeOutputShape$1.y;
+                width = subPixelOptimizeOutputShape$1.width;
+                height = subPixelOptimizeOutputShape$1.height;
+                subPixelOptimizeOutputShape$1.r = shape.r;
+                shape = subPixelOptimizeOutputShape$1;
+            }
+            else {
+                x = shape.x;
+                y = shape.y;
+                width = shape.width;
+                height = shape.height;
+            }
+
+            if (!shape.r) {
+                ctx.rect(x, y, width, height);
+            }
+            else {
+                buildPath(ctx, shape);
+            }
+            ctx.closePath();
+            return;
+        }
+    });
+
+    /**
+     * 圆环
+     * @module zrender/graphic/shape/Ring
+     */
+
+    var Ring = Path.extend({
+
+        type: 'ring',
+
+        shape: {
+            cx: 0,
+            cy: 0,
+            r: 0,
+            r0: 0
+        },
+
+        buildPath: function (ctx, shape) {
+            var x = shape.cx;
+            var y = shape.cy;
+            var PI2 = Math.PI * 2;
+            ctx.moveTo(x + shape.r, y);
+            ctx.arc(x, y, shape.r, 0, PI2, false);
+            ctx.moveTo(x + shape.r0, y);
+            ctx.arc(x, y, shape.r0, 0, PI2, true);
+        }
+    });
+
+    // Fix weird bug in some version of IE11 (like 11.0.9600.178**),
+    // where exception "unexpected call to method or property access"
+    // might be thrown when calling ctx.fill or ctx.stroke after a path
+    // whose area size is zero is drawn and ctx.clip() is called and
+    // shadowBlur is set. See #4572, #3112, #5777.
+    // (e.g.,
+    //  ctx.moveTo(10, 10);
+    //  ctx.lineTo(20, 10);
+    //  ctx.closePath();
+    //  ctx.clip();
+    //  ctx.shadowBlur = 10;
+    //  ...
+    //  ctx.fill();
+    // )
+
+    var shadowTemp = [
+        ['shadowBlur', 0],
+        ['shadowColor', '#000'],
+        ['shadowOffsetX', 0],
+        ['shadowOffsetY', 0]
+    ];
+
+    function fixClipWithShadow (orignalBrush) {
+
+        // version string can be: '11.0'
+        return (env$1.browser.ie && env$1.browser.version >= 11)
+
+            ? function () {
+                var clipPaths = this.__clipPaths;
+                var style = this.style;
+                var modified;
+
+                if (clipPaths) {
+                    for (var i = 0; i < clipPaths.length; i++) {
+                        var clipPath = clipPaths[i];
+                        var shape = clipPath && clipPath.shape;
+                        var type = clipPath && clipPath.type;
+
+                        if (shape && (
+                            (type === 'sector' && shape.startAngle === shape.endAngle)
+                            || (type === 'rect' && (!shape.width || !shape.height))
+                        )) {
+                            for (var j = 0; j < shadowTemp.length; j++) {
+                                // It is save to put shadowTemp static, because shadowTemp
+                                // will be all modified each item brush called.
+                                shadowTemp[j][2] = style[shadowTemp[j][0]];
+                                style[shadowTemp[j][0]] = shadowTemp[j][1];
+                            }
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+
+                orignalBrush.apply(this, arguments);
+
+                if (modified) {
+                    for (var j = 0; j < shadowTemp.length; j++) {
+                        style[shadowTemp[j][0]] = shadowTemp[j][2];
+                    }
+                }
+            }
+
+            : orignalBrush;
+    }
+
+    /**
+     * 扇形
+     * @module zrender/graphic/shape/Sector
+     */
+
+    var Sector = Path.extend({
+
+        type: 'sector',
+
+        shape: {
+
+            cx: 0,
+
+            cy: 0,
+
+            r0: 0,
+
+            r: 0,
+
+            startAngle: 0,
+
+            endAngle: Math.PI * 2,
+
+            clockwise: true
+        },
+
+        brush: fixClipWithShadow(Path.prototype.brush),
+
+        buildPath: function (ctx, shape) {
+
+            var x = shape.cx;
+            var y = shape.cy;
+            var r0 = Math.max(shape.r0 || 0, 0);
+            var r = Math.max(shape.r, 0);
+            var startAngle = shape.startAngle;
+            var endAngle = shape.endAngle;
+            var clockwise = shape.clockwise;
+
+            var unitX = Math.cos(startAngle);
+            var unitY = Math.sin(startAngle);
+
+            ctx.moveTo(unitX * r0 + x, unitY * r0 + y);
+
+            ctx.lineTo(unitX * r + x, unitY * r + y);
+
+            ctx.arc(x, y, r, startAngle, endAngle, !clockwise);
+
+            ctx.lineTo(
+                Math.cos(endAngle) * r0 + x,
+                Math.sin(endAngle) * r0 + y
+            );
+
+            if (r0 !== 0) {
+                ctx.arc(x, y, r0, endAngle, startAngle, clockwise);
+            }
+
+            ctx.closePath();
+        }
+    });
+
+    /**
+     * @alias zrender/graphic/Text
+     * @extends module:zrender/graphic/Displayable
+     * @constructor
+     * @param {Object} opts
+     */
+    var Text = function (opts) { // jshint ignore:line
+        Displayable.call(this, opts);
+    };
+
+    Text.prototype = {
+
+        constructor: Text,
+
+        type: 'text',
+
+        brush: function (ctx, prevEl) {
+            var style = this.style;
+
+            // Optimize, avoid normalize every time.
+            this.__dirty && normalizeTextStyle(style, true);
+
+            // Use props with prefix 'text'.
+            style.fill = style.stroke = style.shadowBlur = style.shadowColor =
+                style.shadowOffsetX = style.shadowOffsetY = null;
+
+            var text = style.text;
+            // Convert to string
+            text != null && (text += '');
+
+            // Do not apply style.bind in Text node. Because the real bind job
+            // is in textHelper.renderText, and performance of text render should
+            // be considered.
+            // style.bind(ctx, this, prevEl);
+
+            if (!needDrawText(text, style)) {
+                // The current el.style is not applied
+                // and should not be used as cache.
+                ctx.__attrCachedBy = ContextCachedBy.NONE;
+                return;
+            }
+
+            this.setTransform(ctx);
+
+            renderText(this, ctx, text, style, null, prevEl);
+
+            this.restoreTransform(ctx);
+        },
+
+        getBoundingRect: function () {
+            var style = this.style;
+
+            // Optimize, avoid normalize every time.
+            this.__dirty && normalizeTextStyle(style, true);
+
+            if (!this._rect) {
+                var text = style.text;
+                text != null ? (text += '') : (text = '');
+
+                var rect = getBoundingRect(
+                    style.text + '',
+                    style.font,
+                    style.textAlign,
+                    style.textVerticalAlign,
+                    style.textPadding,
+                    style.textLineHeight,
+                    style.rich
+                );
+
+                rect.x += style.x || 0;
+                rect.y += style.y || 0;
+
+                if (getStroke(style.textStroke, style.textStrokeWidth)) {
+                    var w = style.textStrokeWidth;
+                    rect.x -= w / 2;
+                    rect.y -= w / 2;
+                    rect.width += w;
+                    rect.height += w;
+                }
+
+                this._rect = rect;
+            }
+
+            return this._rect;
+        }
+    };
+
+    inherits(Text, Displayable);
+
     var CMD$2 = PathProxy.CMD;
 
     var points = [[], [], []];
@@ -15357,1238 +16589,6 @@
 
         return pathBundle;
     }
-
-    /**
-     * @alias zrender/graphic/Text
-     * @extends module:zrender/graphic/Displayable
-     * @constructor
-     * @param {Object} opts
-     */
-    var Text = function (opts) { // jshint ignore:line
-        Displayable.call(this, opts);
-    };
-
-    Text.prototype = {
-
-        constructor: Text,
-
-        type: 'text',
-
-        brush: function (ctx, prevEl) {
-            var style = this.style;
-
-            // Optimize, avoid normalize every time.
-            this.__dirty && normalizeTextStyle(style, true);
-
-            // Use props with prefix 'text'.
-            style.fill = style.stroke = style.shadowBlur = style.shadowColor =
-                style.shadowOffsetX = style.shadowOffsetY = null;
-
-            var text = style.text;
-            // Convert to string
-            text != null && (text += '');
-
-            // Do not apply style.bind in Text node. Because the real bind job
-            // is in textHelper.renderText, and performance of text render should
-            // be considered.
-            // style.bind(ctx, this, prevEl);
-
-            if (!needDrawText(text, style)) {
-                // The current el.style is not applied
-                // and should not be used as cache.
-                ctx.__attrCachedBy = ContextCachedBy.NONE;
-                return;
-            }
-
-            this.setTransform(ctx);
-
-            renderText(this, ctx, text, style, null, prevEl);
-
-            this.restoreTransform(ctx);
-        },
-
-        getBoundingRect: function () {
-            var style = this.style;
-
-            // Optimize, avoid normalize every time.
-            this.__dirty && normalizeTextStyle(style, true);
-
-            if (!this._rect) {
-                var text = style.text;
-                text != null ? (text += '') : (text = '');
-
-                var rect = getBoundingRect(
-                    style.text + '',
-                    style.font,
-                    style.textAlign,
-                    style.textVerticalAlign,
-                    style.textPadding,
-                    style.textLineHeight,
-                    style.rich
-                );
-
-                rect.x += style.x || 0;
-                rect.y += style.y || 0;
-
-                if (getStroke(style.textStroke, style.textStrokeWidth)) {
-                    var w = style.textStrokeWidth;
-                    rect.x -= w / 2;
-                    rect.y -= w / 2;
-                    rect.width += w;
-                    rect.height += w;
-                }
-
-                this._rect = rect;
-            }
-
-            return this._rect;
-        }
-    };
-
-    inherits(Text, Displayable);
-
-    /**
-     * 圆形
-     * @module zrender/shape/Circle
-     */
-
-    var Circle = Path.extend({
-
-        type: 'circle',
-
-        shape: {
-            cx: 0,
-            cy: 0,
-            r: 0
-        },
-
-
-        buildPath: function (ctx, shape, inBundle) {
-            // Better stroking in ShapeBundle
-            // Always do it may have performence issue ( fill may be 2x more cost)
-            if (inBundle) {
-                ctx.moveTo(shape.cx + shape.r, shape.cy);
-            }
-            // else {
-            //     if (ctx.allocate && !ctx.data.length) {
-            //         ctx.allocate(ctx.CMD_MEM_SIZE.A);
-            //     }
-            // }
-            // Better stroking in ShapeBundle
-            // ctx.moveTo(shape.cx + shape.r, shape.cy);
-            ctx.arc(shape.cx, shape.cy, shape.r, 0, Math.PI * 2, true);
-        }
-    });
-
-    // Fix weird bug in some version of IE11 (like 11.0.9600.178**),
-    // where exception "unexpected call to method or property access"
-    // might be thrown when calling ctx.fill or ctx.stroke after a path
-    // whose area size is zero is drawn and ctx.clip() is called and
-    // shadowBlur is set. See #4572, #3112, #5777.
-    // (e.g.,
-    //  ctx.moveTo(10, 10);
-    //  ctx.lineTo(20, 10);
-    //  ctx.closePath();
-    //  ctx.clip();
-    //  ctx.shadowBlur = 10;
-    //  ...
-    //  ctx.fill();
-    // )
-
-    var shadowTemp = [
-        ['shadowBlur', 0],
-        ['shadowColor', '#000'],
-        ['shadowOffsetX', 0],
-        ['shadowOffsetY', 0]
-    ];
-
-    function fixClipWithShadow (orignalBrush) {
-
-        // version string can be: '11.0'
-        return (env$1.browser.ie && env$1.browser.version >= 11)
-
-            ? function () {
-                var clipPaths = this.__clipPaths;
-                var style = this.style;
-                var modified;
-
-                if (clipPaths) {
-                    for (var i = 0; i < clipPaths.length; i++) {
-                        var clipPath = clipPaths[i];
-                        var shape = clipPath && clipPath.shape;
-                        var type = clipPath && clipPath.type;
-
-                        if (shape && (
-                            (type === 'sector' && shape.startAngle === shape.endAngle)
-                            || (type === 'rect' && (!shape.width || !shape.height))
-                        )) {
-                            for (var j = 0; j < shadowTemp.length; j++) {
-                                // It is save to put shadowTemp static, because shadowTemp
-                                // will be all modified each item brush called.
-                                shadowTemp[j][2] = style[shadowTemp[j][0]];
-                                style[shadowTemp[j][0]] = shadowTemp[j][1];
-                            }
-                            modified = true;
-                            break;
-                        }
-                    }
-                }
-
-                orignalBrush.apply(this, arguments);
-
-                if (modified) {
-                    for (var j = 0; j < shadowTemp.length; j++) {
-                        style[shadowTemp[j][0]] = shadowTemp[j][2];
-                    }
-                }
-            }
-
-            : orignalBrush;
-    }
-
-    /**
-     * 扇形
-     * @module zrender/graphic/shape/Sector
-     */
-
-    var Sector = Path.extend({
-
-        type: 'sector',
-
-        shape: {
-
-            cx: 0,
-
-            cy: 0,
-
-            r0: 0,
-
-            r: 0,
-
-            startAngle: 0,
-
-            endAngle: Math.PI * 2,
-
-            clockwise: true
-        },
-
-        brush: fixClipWithShadow(Path.prototype.brush),
-
-        buildPath: function (ctx, shape) {
-
-            var x = shape.cx;
-            var y = shape.cy;
-            var r0 = Math.max(shape.r0 || 0, 0);
-            var r = Math.max(shape.r, 0);
-            var startAngle = shape.startAngle;
-            var endAngle = shape.endAngle;
-            var clockwise = shape.clockwise;
-
-            var unitX = Math.cos(startAngle);
-            var unitY = Math.sin(startAngle);
-
-            ctx.moveTo(unitX * r0 + x, unitY * r0 + y);
-
-            ctx.lineTo(unitX * r + x, unitY * r + y);
-
-            ctx.arc(x, y, r, startAngle, endAngle, !clockwise);
-
-            ctx.lineTo(
-                Math.cos(endAngle) * r0 + x,
-                Math.sin(endAngle) * r0 + y
-            );
-
-            if (r0 !== 0) {
-                ctx.arc(x, y, r0, endAngle, startAngle, clockwise);
-            }
-
-            ctx.closePath();
-        }
-    });
-
-    /**
-     * 圆环
-     * @module zrender/graphic/shape/Ring
-     */
-
-    var Ring = Path.extend({
-
-        type: 'ring',
-
-        shape: {
-            cx: 0,
-            cy: 0,
-            r: 0,
-            r0: 0
-        },
-
-        buildPath: function (ctx, shape) {
-            var x = shape.cx;
-            var y = shape.cy;
-            var PI2 = Math.PI * 2;
-            ctx.moveTo(x + shape.r, y);
-            ctx.arc(x, y, shape.r, 0, PI2, false);
-            ctx.moveTo(x + shape.r0, y);
-            ctx.arc(x, y, shape.r0, 0, PI2, true);
-        }
-    });
-
-    /**
-     * Catmull-Rom spline 插值折线
-     * @module zrender/shape/util/smoothSpline
-     * @author pissang (https://www.github.com/pissang)
-     *         Kener (@Kener-林峰, kener.linfeng@gmail.com)
-     *         errorrik (errorrik@gmail.com)
-     */
-
-    /**
-     * @inner
-     */
-    function interpolate(p0, p1, p2, p3, t, t2, t3) {
-        var v0 = (p2 - p0) * 0.5;
-        var v1 = (p3 - p1) * 0.5;
-        return (2 * (p1 - p2) + v0 + v1) * t3
-                + (-3 * (p1 - p2) - 2 * v0 - v1) * t2
-                + v0 * t + p1;
-    }
-
-    /**
-     * @alias module:zrender/shape/util/smoothSpline
-     * @param {Array} points 线段顶点数组
-     * @param {boolean} isLoop
-     * @return {Array}
-     */
-    function smoothSpline (points, isLoop) {
-        var len$$1 = points.length;
-        var ret = [];
-
-        var distance$$1 = 0;
-        for (var i = 1; i < len$$1; i++) {
-            distance$$1 += distance(points[i - 1], points[i]);
-        }
-
-        var segs = distance$$1 / 2;
-        segs = segs < len$$1 ? len$$1 : segs;
-        for (var i = 0; i < segs; i++) {
-            var pos = i / (segs - 1) * (isLoop ? len$$1 : len$$1 - 1);
-            var idx = Math.floor(pos);
-
-            var w = pos - idx;
-
-            var p0;
-            var p1 = points[idx % len$$1];
-            var p2;
-            var p3;
-            if (!isLoop) {
-                p0 = points[idx === 0 ? idx : idx - 1];
-                p2 = points[idx > len$$1 - 2 ? len$$1 - 1 : idx + 1];
-                p3 = points[idx > len$$1 - 3 ? len$$1 - 1 : idx + 2];
-            }
-            else {
-                p0 = points[(idx - 1 + len$$1) % len$$1];
-                p2 = points[(idx + 1) % len$$1];
-                p3 = points[(idx + 2) % len$$1];
-            }
-
-            var w2 = w * w;
-            var w3 = w * w2;
-
-            ret.push([
-                interpolate(p0[0], p1[0], p2[0], p3[0], w, w2, w3),
-                interpolate(p0[1], p1[1], p2[1], p3[1], w, w2, w3)
-            ]);
-        }
-        return ret;
-    }
-
-    /**
-     * 贝塞尔平滑曲线
-     * @module zrender/shape/util/smoothBezier
-     * @author pissang (https://www.github.com/pissang)
-     *         Kener (@Kener-林峰, kener.linfeng@gmail.com)
-     *         errorrik (errorrik@gmail.com)
-     */
-
-    /**
-     * 贝塞尔平滑曲线
-     * @alias module:zrender/shape/util/smoothBezier
-     * @param {Array} points 线段顶点数组
-     * @param {number} smooth 平滑等级, 0-1
-     * @param {boolean} isLoop
-     * @param {Array} constraint 将计算出来的控制点约束在一个包围盒内
-     *                           比如 [[0, 0], [100, 100]], 这个包围盒会与
-     *                           整个折线的包围盒做一个并集用来约束控制点。
-     * @param {Array} 计算出来的控制点数组
-     */
-    function smoothBezier (points, smooth, isLoop, constraint) {
-        var cps = [];
-
-        var v = [];
-        var v1 = [];
-        var v2 = [];
-        var prevPoint;
-        var nextPoint;
-
-        var min$$1;
-        var max$$1;
-        if (constraint) {
-            min$$1 = [Infinity, Infinity];
-            max$$1 = [-Infinity, -Infinity];
-            for (var i = 0, len$$1 = points.length; i < len$$1; i++) {
-                min(min$$1, min$$1, points[i]);
-                max(max$$1, max$$1, points[i]);
-            }
-            // 与指定的包围盒做并集
-            min(min$$1, min$$1, constraint[0]);
-            max(max$$1, max$$1, constraint[1]);
-        }
-
-        for (var i = 0, len$$1 = points.length; i < len$$1; i++) {
-            var point = points[i];
-
-            if (isLoop) {
-                prevPoint = points[i ? i - 1 : len$$1 - 1];
-                nextPoint = points[(i + 1) % len$$1];
-            }
-            else {
-                if (i === 0 || i === len$$1 - 1) {
-                    cps.push(clone$1(points[i]));
-                    continue;
-                }
-                else {
-                    prevPoint = points[i - 1];
-                    nextPoint = points[i + 1];
-                }
-            }
-
-            sub(v, nextPoint, prevPoint);
-
-            // use degree to scale the handle length
-            scale(v, v, smooth);
-
-            var d0 = distance(point, prevPoint);
-            var d1 = distance(point, nextPoint);
-            var sum = d0 + d1;
-            if (sum !== 0) {
-                d0 /= sum;
-                d1 /= sum;
-            }
-
-            scale(v1, v, -d0);
-            scale(v2, v, d1);
-            var cp0 = add([], point, v1);
-            var cp1 = add([], point, v2);
-            if (constraint) {
-                max(cp0, cp0, min$$1);
-                min(cp0, cp0, max$$1);
-                max(cp1, cp1, min$$1);
-                min(cp1, cp1, max$$1);
-            }
-            cps.push(cp0);
-            cps.push(cp1);
-        }
-
-        if (isLoop) {
-            cps.push(cps.shift());
-        }
-
-        return cps;
-    }
-
-    function buildPath$1(ctx, shape, closePath) {
-        var points = shape.points;
-        var smooth = shape.smooth;
-        if (points && points.length >= 2) {
-            if (smooth && smooth !== 'spline') {
-                var controlPoints = smoothBezier(
-                    points, smooth, closePath, shape.smoothConstraint
-                );
-
-                ctx.moveTo(points[0][0], points[0][1]);
-                var len = points.length;
-                for (var i = 0; i < (closePath ? len : len - 1); i++) {
-                    var cp1 = controlPoints[i * 2];
-                    var cp2 = controlPoints[i * 2 + 1];
-                    var p = points[(i + 1) % len];
-                    ctx.bezierCurveTo(
-                        cp1[0], cp1[1], cp2[0], cp2[1], p[0], p[1]
-                    );
-                }
-            }
-            else {
-                if (smooth === 'spline') {
-                    points = smoothSpline(points, closePath);
-                }
-
-                ctx.moveTo(points[0][0], points[0][1]);
-                for (var i = 1, l = points.length; i < l; i++) {
-                    ctx.lineTo(points[i][0], points[i][1]);
-                }
-            }
-
-            closePath && ctx.closePath();
-        }
-    }
-
-    /**
-     * 多边形
-     * @module zrender/shape/Polygon
-     */
-
-    var Polygon = Path.extend({
-
-        type: 'polygon',
-
-        shape: {
-            points: null,
-
-            smooth: false,
-
-            smoothConstraint: null
-        },
-
-        buildPath: function (ctx, shape) {
-            buildPath$1(ctx, shape, true);
-        }
-    });
-
-    /**
-     * @module zrender/graphic/shape/Polyline
-     */
-
-    var Polyline = Path.extend({
-
-        type: 'polyline',
-
-        shape: {
-            points: null,
-
-            smooth: false,
-
-            smoothConstraint: null
-        },
-
-        style: {
-            stroke: '#000',
-
-            fill: null
-        },
-
-        buildPath: function (ctx, shape) {
-            buildPath$1(ctx, shape, false);
-        }
-    });
-
-    /**
-     * Sub-pixel optimize for canvas rendering, prevent from blur
-     * when rendering a thin vertical/horizontal line.
-     */
-
-    var round = Math.round;
-
-    /**
-     * Sub pixel optimize line for canvas
-     *
-     * @param {Object} outputShape The modification will be performed on `outputShape`.
-     *                 `outputShape` and `inputShape` can be the same object.
-     *                 `outputShape` object can be used repeatly, because all of
-     *                 the `x1`, `x2`, `y1`, `y2` will be assigned in this method.
-     * @param {Object} [inputShape]
-     * @param {number} [inputShape.x1]
-     * @param {number} [inputShape.y1]
-     * @param {number} [inputShape.x2]
-     * @param {number} [inputShape.y2]
-     * @param {Object} [style]
-     * @param {number} [style.lineWidth] If `null`/`undefined`/`0`, do not optimize.
-     */
-    function subPixelOptimizeLine(outputShape, inputShape, style) {
-        if (!inputShape) {
-            return;
-        }
-
-        var x1 = inputShape.x1;
-        var x2 = inputShape.x2;
-        var y1 = inputShape.y1;
-        var y2 = inputShape.y2;
-
-        outputShape.x1 = x1;
-        outputShape.x2 = x2;
-        outputShape.y1 = y1;
-        outputShape.y2 = y2;
-
-        var lineWidth = style && style.lineWidth;
-        if (!lineWidth) {
-            return;
-        }
-
-        if (round(x1 * 2) === round(x2 * 2)) {
-            outputShape.x1 = outputShape.x2 = subPixelOptimize(x1, lineWidth, true);
-        }
-        if (round(y1 * 2) === round(y2 * 2)) {
-            outputShape.y1 = outputShape.y2 = subPixelOptimize(y1, lineWidth, true);
-        }
-    }
-
-    /**
-     * Sub pixel optimize rect for canvas
-     *
-     * @param {Object} outputShape The modification will be performed on `outputShape`.
-     *                 `outputShape` and `inputShape` can be the same object.
-     *                 `outputShape` object can be used repeatly, because all of
-     *                 the `x`, `y`, `width`, `height` will be assigned in this method.
-     * @param {Object} [inputShape]
-     * @param {number} [inputShape.x]
-     * @param {number} [inputShape.y]
-     * @param {number} [inputShape.width]
-     * @param {number} [inputShape.height]
-     * @param {Object} [style]
-     * @param {number} [style.lineWidth] If `null`/`undefined`/`0`, do not optimize.
-     */
-    function subPixelOptimizeRect(outputShape, inputShape, style) {
-        if (!inputShape) {
-            return;
-        }
-
-        var originX = inputShape.x;
-        var originY = inputShape.y;
-        var originWidth = inputShape.width;
-        var originHeight = inputShape.height;
-
-        outputShape.x = originX;
-        outputShape.y = originY;
-        outputShape.width = originWidth;
-        outputShape.height = originHeight;
-
-        var lineWidth = style && style.lineWidth;
-        if (!lineWidth) {
-            return;
-        }
-
-        outputShape.x = subPixelOptimize(originX, lineWidth, true);
-        outputShape.y = subPixelOptimize(originY, lineWidth, true);
-        outputShape.width = Math.max(
-            subPixelOptimize(originX + originWidth, lineWidth, false) - outputShape.x,
-            originWidth === 0 ? 0 : 1
-        );
-        outputShape.height = Math.max(
-            subPixelOptimize(originY + originHeight, lineWidth, false) - outputShape.y,
-            originHeight === 0 ? 0 : 1
-        );
-    }
-
-    /**
-     * Sub pixel optimize for canvas
-     *
-     * @param {number} position Coordinate, such as x, y
-     * @param {number} lineWidth If `null`/`undefined`/`0`, do not optimize.
-     * @param {boolean=} positiveOrNegative Default false (negative).
-     * @return {number} Optimized position.
-     */
-    function subPixelOptimize(position, lineWidth, positiveOrNegative) {
-        if (!lineWidth) {
-            return position;
-        }
-        // Assure that (position + lineWidth / 2) is near integer edge,
-        // otherwise line will be fuzzy in canvas.
-        var doubledPosition = round(position * 2);
-        return (doubledPosition + round(lineWidth)) % 2 === 0
-            ? doubledPosition / 2
-            : (doubledPosition + (positiveOrNegative ? 1 : -1)) / 2;
-    }
-
-    /**
-     * 矩形
-     * @module zrender/graphic/shape/Rect
-     */
-
-    // Avoid create repeatly.
-    var subPixelOptimizeOutputShape = {};
-
-    var Rect = Path.extend({
-
-        type: 'rect',
-
-        shape: {
-            // 左上、右上、右下、左下角的半径依次为r1、r2、r3、r4
-            // r缩写为1         相当于 [1, 1, 1, 1]
-            // r缩写为[1]       相当于 [1, 1, 1, 1]
-            // r缩写为[1, 2]    相当于 [1, 2, 1, 2]
-            // r缩写为[1, 2, 3] 相当于 [1, 2, 3, 2]
-            r: 0,
-
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0
-        },
-
-        buildPath: function (ctx, shape) {
-            var x;
-            var y;
-            var width;
-            var height;
-
-            if (this.subPixelOptimize) {
-                subPixelOptimizeRect(subPixelOptimizeOutputShape, shape, this.style);
-                x = subPixelOptimizeOutputShape.x;
-                y = subPixelOptimizeOutputShape.y;
-                width = subPixelOptimizeOutputShape.width;
-                height = subPixelOptimizeOutputShape.height;
-                subPixelOptimizeOutputShape.r = shape.r;
-                shape = subPixelOptimizeOutputShape;
-            }
-            else {
-                x = shape.x;
-                y = shape.y;
-                width = shape.width;
-                height = shape.height;
-            }
-
-            if (!shape.r) {
-                ctx.rect(x, y, width, height);
-            }
-            else {
-                buildPath(ctx, shape);
-            }
-            ctx.closePath();
-            return;
-        }
-    });
-
-    /**
-     * 直线
-     * @module zrender/graphic/shape/Line
-     */
-
-    // Avoid create repeatly.
-    var subPixelOptimizeOutputShape$1 = {};
-
-    var Line = Path.extend({
-
-        type: 'line',
-
-        shape: {
-            // Start point
-            x1: 0,
-            y1: 0,
-            // End point
-            x2: 0,
-            y2: 0,
-
-            percent: 1
-        },
-
-        style: {
-            stroke: '#000',
-            fill: null
-        },
-
-        buildPath: function (ctx, shape) {
-            var x1;
-            var y1;
-            var x2;
-            var y2;
-
-            if (this.subPixelOptimize) {
-                subPixelOptimizeLine(subPixelOptimizeOutputShape$1, shape, this.style);
-                x1 = subPixelOptimizeOutputShape$1.x1;
-                y1 = subPixelOptimizeOutputShape$1.y1;
-                x2 = subPixelOptimizeOutputShape$1.x2;
-                y2 = subPixelOptimizeOutputShape$1.y2;
-            }
-            else {
-                x1 = shape.x1;
-                y1 = shape.y1;
-                x2 = shape.x2;
-                y2 = shape.y2;
-            }
-
-            var percent = shape.percent;
-
-            if (percent === 0) {
-                return;
-            }
-
-            ctx.moveTo(x1, y1);
-
-            if (percent < 1) {
-                x2 = x1 * (1 - percent) + x2 * percent;
-                y2 = y1 * (1 - percent) + y2 * percent;
-            }
-            ctx.lineTo(x2, y2);
-        },
-
-        /**
-         * Get point at percent
-         * @param  {number} percent
-         * @return {Array.<number>}
-         */
-        pointAt: function (p) {
-            var shape = this.shape;
-            return [
-                shape.x1 * (1 - p) + shape.x2 * p,
-                shape.y1 * (1 - p) + shape.y2 * p
-            ];
-        }
-    });
-
-    /**
-     * 贝塞尔曲线
-     * @module zrender/shape/BezierCurve
-     */
-
-    var out = [];
-
-    function someVectorAt(shape, t, isTangent) {
-        var cpx2 = shape.cpx2;
-        var cpy2 = shape.cpy2;
-        if (cpx2 === null || cpy2 === null) {
-            return [
-                (isTangent ? cubicDerivativeAt : cubicAt)(shape.x1, shape.cpx1, shape.cpx2, shape.x2, t),
-                (isTangent ? cubicDerivativeAt : cubicAt)(shape.y1, shape.cpy1, shape.cpy2, shape.y2, t)
-            ];
-        }
-        else {
-            return [
-                (isTangent ? quadraticDerivativeAt : quadraticAt)(shape.x1, shape.cpx1, shape.x2, t),
-                (isTangent ? quadraticDerivativeAt : quadraticAt)(shape.y1, shape.cpy1, shape.y2, t)
-            ];
-        }
-    }
-
-    var BezierCurve = Path.extend({
-
-        type: 'bezier-curve',
-
-        shape: {
-            x1: 0,
-            y1: 0,
-            x2: 0,
-            y2: 0,
-            cpx1: 0,
-            cpy1: 0,
-            // cpx2: 0,
-            // cpy2: 0
-
-            // Curve show percent, for animating
-            percent: 1
-        },
-
-        style: {
-            stroke: '#000',
-            fill: null
-        },
-
-        buildPath: function (ctx, shape) {
-            var x1 = shape.x1;
-            var y1 = shape.y1;
-            var x2 = shape.x2;
-            var y2 = shape.y2;
-            var cpx1 = shape.cpx1;
-            var cpy1 = shape.cpy1;
-            var cpx2 = shape.cpx2;
-            var cpy2 = shape.cpy2;
-            var percent = shape.percent;
-            if (percent === 0) {
-                return;
-            }
-
-            ctx.moveTo(x1, y1);
-
-            if (cpx2 == null || cpy2 == null) {
-                if (percent < 1) {
-                    quadraticSubdivide(
-                        x1, cpx1, x2, percent, out
-                    );
-                    cpx1 = out[1];
-                    x2 = out[2];
-                    quadraticSubdivide(
-                        y1, cpy1, y2, percent, out
-                    );
-                    cpy1 = out[1];
-                    y2 = out[2];
-                }
-
-                ctx.quadraticCurveTo(
-                    cpx1, cpy1,
-                    x2, y2
-                );
-            }
-            else {
-                if (percent < 1) {
-                    cubicSubdivide(
-                        x1, cpx1, cpx2, x2, percent, out
-                    );
-                    cpx1 = out[1];
-                    cpx2 = out[2];
-                    x2 = out[3];
-                    cubicSubdivide(
-                        y1, cpy1, cpy2, y2, percent, out
-                    );
-                    cpy1 = out[1];
-                    cpy2 = out[2];
-                    y2 = out[3];
-                }
-                ctx.bezierCurveTo(
-                    cpx1, cpy1,
-                    cpx2, cpy2,
-                    x2, y2
-                );
-            }
-        },
-
-        /**
-         * Get point at percent
-         * @param  {number} t
-         * @return {Array.<number>}
-         */
-        pointAt: function (t) {
-            return someVectorAt(this.shape, t, false);
-        },
-
-        /**
-         * Get tangent at percent
-         * @param  {number} t
-         * @return {Array.<number>}
-         */
-        tangentAt: function (t) {
-            var p = someVectorAt(this.shape, t, true);
-            return normalize(p, p);
-        }
-    });
-
-    /**
-     * 圆弧
-     * @module zrender/graphic/shape/Arc
-     */
-
-    var Arc = Path.extend({
-
-        type: 'arc',
-
-        shape: {
-
-            cx: 0,
-
-            cy: 0,
-
-            r: 0,
-
-            startAngle: 0,
-
-            endAngle: Math.PI * 2,
-
-            clockwise: true
-        },
-
-        style: {
-
-            stroke: '#000',
-
-            fill: null
-        },
-
-        buildPath: function (ctx, shape) {
-
-            var x = shape.cx;
-            var y = shape.cy;
-            var r = Math.max(shape.r, 0);
-            var startAngle = shape.startAngle;
-            var endAngle = shape.endAngle;
-            var clockwise = shape.clockwise;
-
-            var unitX = Math.cos(startAngle);
-            var unitY = Math.sin(startAngle);
-
-            ctx.moveTo(unitX * r + x, unitY * r + y);
-            ctx.arc(x, y, r, startAngle, endAngle, !clockwise);
-        }
-    });
-
-    // CompoundPath to improve performance
-
-    var CompoundPath = Path.extend({
-
-        type: 'compound',
-
-        shape: {
-
-            paths: null
-        },
-
-        _updatePathDirty: function () {
-            var dirtyPath = this.__dirtyPath;
-            var paths = this.shape.paths;
-            for (var i = 0; i < paths.length; i++) {
-                // Mark as dirty if any subpath is dirty
-                dirtyPath = dirtyPath || paths[i].__dirtyPath;
-            }
-            this.__dirtyPath = dirtyPath;
-            this.__dirty = this.__dirty || dirtyPath;
-        },
-
-        beforeBrush: function () {
-            this._updatePathDirty();
-            var paths = this.shape.paths || [];
-            var scale = this.getGlobalScale();
-            // Update path scale
-            for (var i = 0; i < paths.length; i++) {
-                if (!paths[i].path) {
-                    paths[i].createPathProxy();
-                }
-                paths[i].path.setScale(scale[0], scale[1], paths[i].segmentIgnoreThreshold);
-            }
-        },
-
-        buildPath: function (ctx, shape) {
-            var paths = shape.paths || [];
-            for (var i = 0; i < paths.length; i++) {
-                paths[i].buildPath(ctx, paths[i].shape, true);
-            }
-        },
-
-        afterBrush: function () {
-            var paths = this.shape.paths || [];
-            for (var i = 0; i < paths.length; i++) {
-                paths[i].__dirtyPath = false;
-            }
-        },
-
-        getBoundingRect: function () {
-            this._updatePathDirty();
-            return Path.prototype.getBoundingRect.call(this);
-        }
-    });
-
-    /**
-     * @param {Array.<Object>} colorStops
-     */
-    var Gradient = function (colorStops) {
-
-        this.colorStops = colorStops || [];
-
-    };
-
-    Gradient.prototype = {
-
-        constructor: Gradient,
-
-        addColorStop: function (offset, color) {
-            this.colorStops.push({
-
-                offset: offset,
-
-                color: color
-            });
-        }
-
-    };
-
-    /**
-     * x, y, x2, y2 are all percent from 0 to 1
-     * @param {number} [x=0]
-     * @param {number} [y=0]
-     * @param {number} [x2=1]
-     * @param {number} [y2=0]
-     * @param {Array.<Object>} colorStops
-     * @param {boolean} [globalCoord=false]
-     */
-    var LinearGradient = function (x, y, x2, y2, colorStops, globalCoord) {
-        // Should do nothing more in this constructor. Because gradient can be
-        // declard by `color: {type: 'linear', colorStops: ...}`, where
-        // this constructor will not be called.
-
-        this.x = x == null ? 0 : x;
-
-        this.y = y == null ? 0 : y;
-
-        this.x2 = x2 == null ? 1 : x2;
-
-        this.y2 = y2 == null ? 0 : y2;
-
-        // Can be cloned
-        this.type = 'linear';
-
-        // If use global coord
-        this.global = globalCoord || false;
-
-        Gradient.call(this, colorStops);
-    };
-
-    LinearGradient.prototype = {
-
-        constructor: LinearGradient
-    };
-
-    inherits(LinearGradient, Gradient);
-
-    /**
-     * x, y, r are all percent from 0 to 1
-     * @param {number} [x=0.5]
-     * @param {number} [y=0.5]
-     * @param {number} [r=0.5]
-     * @param {Array.<Object>} [colorStops]
-     * @param {boolean} [globalCoord=false]
-     */
-    var RadialGradient = function (x, y, r, colorStops, globalCoord) {
-        // Should do nothing more in this constructor. Because gradient can be
-        // declard by `color: {type: 'radial', colorStops: ...}`, where
-        // this constructor will not be called.
-
-        this.x = x == null ? 0.5 : x;
-
-        this.y = y == null ? 0.5 : y;
-
-        this.r = r == null ? 0.5 : r;
-
-        // Can be cloned
-        this.type = 'radial';
-
-        // If use global coord
-        this.global = globalCoord || false;
-
-        Gradient.call(this, colorStops);
-    };
-
-    RadialGradient.prototype = {
-
-        constructor: RadialGradient
-    };
-
-    inherits(RadialGradient, Gradient);
-
-    /**
-     * Displayable for incremental rendering. It will be rendered in a separate layer
-     * IncrementalDisplay have two main methods. `clearDisplayables` and `addDisplayables`
-     * addDisplayables will render the added displayables incremetally.
-     *
-     * It use a not clearFlag to tell the painter don't clear the layer if it's the first element.
-     */
-
-    // TODO Style override ?
-    function IncrementalDisplayble(opts) {
-
-        Displayable.call(this, opts);
-
-        this._displayables = [];
-
-        this._temporaryDisplayables = [];
-
-        this._cursor = 0;
-
-        this.notClear = true;
-    }
-
-    IncrementalDisplayble.prototype.incremental = true;
-
-    IncrementalDisplayble.prototype.clearDisplaybles = function () {
-        this._displayables = [];
-        this._temporaryDisplayables = [];
-        this._cursor = 0;
-        this.dirty();
-
-        this.notClear = false;
-    };
-
-    IncrementalDisplayble.prototype.addDisplayable = function (displayable, notPersistent) {
-        if (notPersistent) {
-            this._temporaryDisplayables.push(displayable);
-        }
-        else {
-            this._displayables.push(displayable);
-        }
-        this.dirty();
-    };
-
-    IncrementalDisplayble.prototype.addDisplayables = function (displayables, notPersistent) {
-        notPersistent = notPersistent || false;
-        for (var i = 0; i < displayables.length; i++) {
-            this.addDisplayable(displayables[i], notPersistent);
-        }
-    };
-
-    IncrementalDisplayble.prototype.eachPendingDisplayable = function (cb) {
-        for (var i = this._cursor; i < this._displayables.length; i++) {
-            cb && cb(this._displayables[i]);
-        }
-        for (var i = 0; i < this._temporaryDisplayables.length; i++) {
-            cb && cb(this._temporaryDisplayables[i]);
-        }
-    };
-
-    IncrementalDisplayble.prototype.update = function () {
-        this.updateTransform();
-        for (var i = this._cursor; i < this._displayables.length; i++) {
-            var displayable = this._displayables[i];
-            // PENDING
-            displayable.parent = this;
-            displayable.update();
-            displayable.parent = null;
-        }
-        for (var i = 0; i < this._temporaryDisplayables.length; i++) {
-            var displayable = this._temporaryDisplayables[i];
-            // PENDING
-            displayable.parent = this;
-            displayable.update();
-            displayable.parent = null;
-        }
-    };
-
-    IncrementalDisplayble.prototype.brush = function (ctx, prevEl) {
-        // Render persistant displayables.
-        for (var i = this._cursor; i < this._displayables.length; i++) {
-            var displayable = this._displayables[i];
-            displayable.beforeBrush && displayable.beforeBrush(ctx);
-            displayable.brush(ctx, i === this._cursor ? null : this._displayables[i - 1]);
-            displayable.afterBrush && displayable.afterBrush(ctx);
-        }
-        this._cursor = i;
-        // Render temporary displayables.
-        for (var i = 0; i < this._temporaryDisplayables.length; i++) {
-            var displayable = this._temporaryDisplayables[i];
-            displayable.beforeBrush && displayable.beforeBrush(ctx);
-            displayable.brush(ctx, i === 0 ? null : this._temporaryDisplayables[i - 1]);
-            displayable.afterBrush && displayable.afterBrush(ctx);
-        }
-
-        this._temporaryDisplayables = [];
-
-        this.notClear = true;
-    };
-
-    var m = [];
-    IncrementalDisplayble.prototype.getBoundingRect = function () {
-        if (!this._rect) {
-            var rect = new BoundingRect(Infinity, Infinity, -Infinity, -Infinity);
-            for (var i = 0; i < this._displayables.length; i++) {
-                var displayable = this._displayables[i];
-                var childRect = displayable.getBoundingRect().clone();
-                if (displayable.needLocalTransform()) {
-                    childRect.applyTransform(displayable.getLocalTransform(m));
-                }
-                rect.union(childRect);
-            }
-            this._rect = rect;
-        }
-        return this._rect;
-    };
-
-    IncrementalDisplayble.prototype.contain = function (x, y) {
-        var localPos = this.transformCoordToLocal(x, y);
-        var rect = this.getBoundingRect();
-
-        if (rect.contain(localPos[0], localPos[1])) {
-            for (var i = 0; i < this._displayables.length; i++) {
-                var displayable = this._displayables[i];
-                if (displayable.contain(x, y)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-
-    inherits(IncrementalDisplayble, Displayable);
 
     /*
     * Licensed to the Apache Software Foundation (ASF) under one
@@ -17400,7 +17400,13 @@
             }
 
             textStyle.textPosition = textPosition;
-            textStyle.textOffset = textStyleModel.getShallow('offset');
+
+            var textOffset = textStyleModel.getShallow('offset');
+            if (isFunction(textOffset)) {
+                textOffset = textOffset(opt);
+            }
+            textStyle.textOffset = textOffset;
+
             var labelRotate = textStyleModel.getShallow('rotate');
             labelRotate != null && (labelRotate *= Math.PI / 180);
             textStyle.textRotation = labelRotate;
