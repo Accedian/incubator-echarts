@@ -41946,10 +41946,13 @@
                 z2: 10
             });
 
+            var textAlign = itemLabelModel.getShallow('align', true) || labelLayout.textAlign;
+
             setTextStyle(textEl.style, itemLabelModel, {
                 text: formattedLabel,
-                textAlign: itemLabelModel.getShallow('align', true)
-                    || labelLayout.textAlign,
+                textAlign: typeof textAlign === 'function'
+                    ? textAlign(labels, labelItem, index)
+                    : textAlign,
                 textVerticalAlign: itemLabelModel.getShallow('verticalAlign', true)
                     || itemLabelModel.getShallow('baseline', true)
                     || labelLayout.textVerticalAlign,

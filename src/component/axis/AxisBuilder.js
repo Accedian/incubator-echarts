@@ -17,15 +17,15 @@
 * under the License.
 */
 
-import {retrieve, defaults, extend, each} from 'zrender/src/core/util';
+import * as matrixUtil from 'zrender/src/core/matrix';
+import { defaults, each, extend, retrieve } from 'zrender/src/core/util';
+import { applyTransform as v2ApplyTransform } from 'zrender/src/core/vector';
+import { shouldShowAllLabels } from '../../coord/axisHelper';
+import Model from '../../model/Model';
 import * as formatUtil from '../../util/format';
 import * as graphic from '../../util/graphic';
-import Model from '../../model/Model';
-import {isRadianAroundZero, remRadian} from '../../util/number';
-import {createSymbol} from '../../util/symbol';
-import * as matrixUtil from 'zrender/src/core/matrix';
-import {applyTransform as v2ApplyTransform} from 'zrender/src/core/vector';
-import {shouldShowAllLabels} from '../../coord/axisHelper';
+import { isRadianAroundZero, remRadian } from '../../util/number';
+import { createSymbol } from '../../util/symbol';
 
 
 var PI = Math.PI;
@@ -726,10 +726,13 @@ function buildAxisLabel(axisBuilder, axisModel, opt) {
             z2: 10
         });
 
+        var textAlign = itemLabelModel.getShallow('align', true) || labelLayout.textAlign;
+
         graphic.setTextStyle(textEl.style, itemLabelModel, {
             text: formattedLabel,
-            textAlign: itemLabelModel.getShallow('align', true)
-                || labelLayout.textAlign,
+            textAlign: typeof textAlign === 'function'
+                ? textAlign(labels, labelItem, index)
+                : textAlign,
             textVerticalAlign: itemLabelModel.getShallow('verticalAlign', true)
                 || itemLabelModel.getShallow('baseline', true)
                 || labelLayout.textVerticalAlign,
